@@ -1,0 +1,6 @@
+midiutil
+tqdm
+numpy
+fluidsynth
+pyobjc
+scipy
