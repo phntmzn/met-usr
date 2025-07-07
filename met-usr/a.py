@@ -6,6 +6,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import cpu_count
+import math
 
 from tqdm import tqdm
 import numpy as np
@@ -39,7 +40,9 @@ class MetalRenderer:
         kernel void audioPostProcess(device float* inAudio  [[ buffer(0) ]],
                                      device float* outAudio [[ buffer(1) ]],
                                      constant uint& effectType [[ buffer(2) ]],
+                                     constant uint& sampleCount [[ buffer(3) ]],
                                      uint id [[ thread_position_in_grid ]]) {
+            if (id >= sampleCount) return;
             float input = inAudio[id];
             float output = 0.0;
 
@@ -70,6 +73,7 @@ class MetalRenderer:
         }
         """
 
+        # Write shader to temporary file
         with NamedTemporaryFile(delete=False, suffix=".metal") as metal_file:
             metal_file.write(shader_source.encode('utf-8'))
             metal_file_path = Path(metal_file.name)
@@ -95,6 +99,7 @@ class MetalRenderer:
         self.kernel = self.library.newFunctionWithName_("audioPostProcess")
         self.pipeline = self.device.newComputePipelineStateWithFunction_error_(self.kernel, None)
 
+    # === AUDIO PROCESSING ===
     def processAudio(self, in_buffer, out_buffer, effect_type, sample_count):
         commandBuffer = self.commandQueue.commandBuffer()
         encoder = commandBuffer.computeCommandEncoder()
@@ -108,8 +113,15 @@ class MetalRenderer:
         effect_type_ptr = objc.ObjCInstance(effect_type_buf.contents()).cast('I')
         effect_type_ptr[0] = effect_type
         encoder.setBuffer_offset_atIndex_(effect_type_buf, 0, 2)
+        threads_per_threadgroup = MTLSizeMake(256, 1, 1)
+        threadgroups = MTLSizeMake(math.ceil(sample_count / 256), 1, 1)
+        sample_count_buf = self.device.newBufferWithLength_options_(4, 0)
+        sample_count_ptr = objc.ObjCInstance(sample_count_buf.contents()).cast('I')
+        sample_count_ptr[0] = sample_count
+        encoder.setBuffer_offset_atIndex_(sample_count_buf, 0, 3)
 
         threads_per_threadgroup = MTLSizeMake(256, 1, 1)
+        threadgroups = MTLSizeMake((sample_count + 255) // 256, 1, 1)
         threadgroups = MTLSizeMake((sample_count + 255) // 256, 1, 1)
 
         encoder.dispatchThreadgroups_threadsPerThreadgroup_(threadgroups, threads_per_threadgroup)
@@ -121,8 +133,8 @@ class MetalRenderer:
 TOTAL_FILES = 200
 TEMPO = 157
 SAMPLE_RATE = 44100
-SOUNDFONT_PATH = "/Users/macbookair/Downloads/OPLLandOPLL2DrumFix2Remake.sf2"
-OUTPUT_DIR = Path.home() / "Desktop" / "wav_only_200"
+SOUNDFONT_PATH = "/Users/macbookair/Downloads/OPLLandOPLL2DrumFix2Remake.sf2" # Change to your desired soundfont path
+OUTPUT_DIR = Path.home() / "Desktop" / "wav_only_200" # Change to your desired output directory
 FLUIDSYNTH_PATH = "/opt/homebrew/bin/fluidsynth"
 POOL_SIZE = max(4, cpu_count())
 
@@ -132,6 +144,7 @@ DURATION_MINUTES = 2
 TOTAL_BEATS = BEATS_PER_MINUTE * DURATION_MINUTES
 BEATS_PER_BAR = 4
 BARS = TOTAL_BEATS // BEATS_PER_BAR
+
 
 # === LAYERED MIDI GENERATOR ===
 def chord_pattern() -> str:
