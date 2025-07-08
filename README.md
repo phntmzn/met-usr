@@ -103,5 +103,5 @@ This project is for **educational and research** use only. Use responsibly and t
 
 ## 📄 License
 
-MIT License © 2025 [`brx86`](https://github.com/phntmzn)
+MIT License © 2025 [`phntmzn`](https://github.com/phntmzn)
 ```
